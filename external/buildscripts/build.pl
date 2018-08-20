@@ -652,9 +652,8 @@ if ($build)
 			die("mono build deps are required and the directory was not found : $externalBuildDeps\n");
 		}
 
-		my $ndkVersion = "r13b";
+		my $ndkVersion = "r16b";
 		my $isArmArch = 1;
-		my $toolchainName = "";
 		my $platformRootPostfix = "";
 		my $useKraitPatch = 1;
 		my $kraitPatchPath = "$monoroot/../../android_krait_signal_handler/build";
@@ -662,18 +661,18 @@ if ($build)
 
 		$isArmArch = 0 if ($androidArch eq "x86");
 
-		$ENV{ANDROID_PLATFORM} = "android-9";
+		$ENV{ANDROID_PLATFORM} = "android-16";
 		$ENV{GCC_VERSION} = "4.9";
 
 		if ($isArmArch)
 		{
-			$ENV{GCC_PREFIX} = "arm-linux-androideabi-";
-			$toolchainName = "$ENV{GCC_PREFIX}$ENV{GCC_VERSION}";
+			$ENV{GCC_PREFIX} = "arm-linux-androideabi";
+			$toolchainName = "$ENV{GCC_PREFIX}-$ENV{GCC_VERSION}";
 			$platformRootPostfix = "arm";
 		}
 		else
 		{
-			$ENV{GCC_PREFIX} = "i686-linux-android-";
+			$ENV{GCC_PREFIX} = "i686-linux-android";
 			$toolchainName = "x86-$ENV{GCC_VERSION}";
 			$platformRootPostfix = "x86";
 			$useKraitPatch = 0;
@@ -772,8 +771,8 @@ if ($build)
 
 		my $androidNdkRoot = $ENV{ANDROID_NDK_ROOT};
 		my $androidPlatformRoot = "$androidNdkRoot/platforms/$ENV{ANDROID_PLATFORM}/arch-$platformRootPostfix";
-		my $androidToolchain = "$androidNdkRoot/toolchains/$toolchainName/prebuilt/$ENV{HOST_ENV}";
 
+		my $androidToolchain = "$androidNdkRoot/toolchains/llvm/prebuilt/$ENV{HOST_ENV}";
 		if (!(-d "$androidToolchain"))
 		{
 			if (-d "$androidToolchain-x86")
@@ -783,6 +782,19 @@ if ($build)
 			else
 			{
 				$androidToolchain = "$androidToolchain-x86_64";
+			}
+		}
+
+		my $androidGCCToolchain = "$androidNdkRoot/toolchains/$toolchainName/prebuilt/$ENV{HOST_ENV}";
+		if (!(-d "$androidGCCToolchain"))
+		{
+			if (-d "$androidGCCToolchain-x86")
+			{
+				$androidGCCToolchain = "$androidGCCToolchain-x86";
+			}
+			else
+			{
+				$androidGCCToolchain = "$androidGCCToolchain-x86_64";
 			}
 		}
 
@@ -823,11 +835,11 @@ if ($build)
 		}
 		elsif ("$androidArch" eq 'armv6_vfp')
 		{
-			$ENV{CFLAGS} = "-DARM_FPU_VFP=1  -march=armv6 -mtune=xscale -msoft-float -mfloat-abi=softfp -mfpu=vfp -DHAVE_ARMV6=1";
+			$ENV{CFLAGS} = "-DARM_FPU_VFP=1  -march=armv6 -mtune=xscale -msoft-float -DHAVE_ARMV6=1";
 		}
 		elsif ("$androidArch" eq 'armv7a')
 		{
-			$ENV{CFLAGS} = "-DARM_FPU_VFP=1  -march=armv7-a -mfloat-abi=softfp -mfpu=vfp -DHAVE_ARMV6=1";
+			$ENV{CFLAGS} = "-DARM_FPU_VFP=1  -march=armv7-a -target armv7-none-linux-androideabi -DHAVE_ARMV6=1";
 			$ENV{LDFLAGS} = "-Wl,--fix-cortex-a8";
 		}
 		elsif ("$androidArch" eq 'x86')
@@ -845,28 +857,36 @@ if ($build)
 			$ENV{LDFLAGS} = "-Wl,-rpath-link=$androidPlatformRoot/usr/lib $ENV{LDFLAGS}";
 		}
 
-		$ENV{PATH} = "$androidToolchain/bin:$ENV{PATH}";
-		$ENV{CC} = "$androidToolchain/bin/$ENV{GCC_PREFIX}gcc$toolChainExtension --sysroot=$androidPlatformRoot";
-		$ENV{CXX} = "$androidToolchain/bin/$ENV{GCC_PREFIX}g++$toolChainExtension --sysroot=$androidPlatformRoot";
-		$ENV{CPP} = "$androidToolchain/bin/$ENV{GCC_PREFIX}cpp$toolChainExtension";
-		$ENV{CXXCPP} = "$androidToolchain/bin/$ENV{GCC_PREFIX}cpp$toolChainExtension";
-		$ENV{CPATH} = "$androidPlatformRoot/usr/include";
-		$ENV{LD} = "$androidToolchain/bin/$ENV{GCC_PREFIX}ld$toolChainExtension";
-		$ENV{AS} = "$androidToolchain/bin/$ENV{GCC_PREFIX}as$toolChainExtension";
-		$ENV{AR} = "$androidToolchain/bin/$ENV{GCC_PREFIX}ar$toolChainExtension";
-		$ENV{RANLIB} = "$androidToolchain/bin/$ENV{GCC_PREFIX}ranlib$toolChainExtension";
-		$ENV{STRIP} = "$androidToolchain/bin/$ENV{GCC_PREFIX}strip$toolChainExtension";
+		my $compilerSysroot = "$androidNdkRoot/sysroot";
+		my $archISystem = $isArmArch ? "$compilerSysroot/usr/include/arm-linux-androideabi" : "$compilerSysroot/usr/include/arm-linux-androideabi/i686-linux-android";
+		my $unifiedISystem = "$compilerSysroot/usr/include";
 
-		$ENV{CFLAGS} = "-DANDROID -DPLATFORM_ANDROID -DLINUX -D__linux__ -DHAVE_USR_INCLUDE_MALLOC_H -DPAGE_SIZE=0x1000 -D_POSIX_PATH_MAX=256 -DS_IWRITE=S_IWUSR -DHAVE_PTHREAD_MUTEX_TIMEDLOCK -fpic -g -ffunction-sections -fdata-sections $ENV{CFLAGS}";
+		$ENV{PATH} = "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin:$androidToolchain/bin:$ENV{PATH}";
+
+		$ENV{CC} = "$androidToolchain/bin/clang -isystem $archISystem -isystem $unifiedISystem";
+		$ENV{CXX} = "$androidToolchain/bin/clang++ -isystem $archISystem -isystem $unifiedISystem";
+		$ENV{CPP} = "$androidToolchain/bin/clang -E -isystem $archISystem -isystem $unifiedISystem";
+		$ENV{CXXCPP} = "$androidToolchain/bin/clang++ -E -isystem $archISystem -isystem $unifiedISystem";
+
+		$ENV{CPATH} = "$androidPlatformRoot/usr/include";
+		#print "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin/ld\n"
+		#die("Josh ^^^");
+		$ENV{LD} = "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin/ld";
+		$ENV{AS} = "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin/as";
+		$ENV{AR} = "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin/ar";
+		$ENV{RANLIB} = "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin/ranlib";
+		$ENV{STRIP} = "$androidGCCToolchain/$ENV{GCC_PREFIX}/bin/strip";
+
+		$ENV{CFLAGS} = "-DANDROID -D__ANDROID_API__=16 -DPLATFORM_ANDROID -DLINUX -D__linux__ -DHAVE_USR_INCLUDE_MALLOC_H -D_POSIX_PATH_MAX=256 -DS_IWRITE=S_IWUSR -DHAVE_PTHREAD_MUTEX_TIMEDLOCK -fpic -g -ffunction-sections -fdata-sections -gcc-toolchain $androidNdkRoot/toolchains/arm-linux-androideabi-4.9/prebuilt/$ENV{HOST_ENV}-x86_64 $ENV{CFLAGS}";
 		$ENV{CXXFLAGS} = $ENV{CFLAGS};
 		$ENV{CPPFLAGS} = $ENV{CFLAGS};
 
 		if ($useKraitPatch)
 		{
-			$ENV{LDFLAGS} = "-Wl,--wrap,sigaction -L$kraitPatchPath/obj/local/armeabi -lkrait-signal-handler $ENV{LDFLAGS}";
+			$ENV{LDFLAGS} = "-Wl,--wrap,sigaction -L$kraitPatchPath/obj/local/armeabi-v7a -lkrait-signal-handler $ENV{LDFLAGS}";
 		}
 
-		$ENV{LDFLAGS} = "-Wl,--no-undefined -Wl,--gc-sections -ldl -lm -llog -lc $ENV{LDFLAGS}";
+		$ENV{LDFLAGS} = "--sysroot=$androidPlatformRoot -Wl,--no-undefined -Wl,--gc-sections -ldl -lm -llog -lc $ENV{LDFLAGS}";
 
 		print "\n";
 		print ">>> Environment:\n";
